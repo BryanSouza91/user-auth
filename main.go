@@ -47,11 +47,6 @@ func main() {
 
 	mux.HandleFunc("/signup", Signup)
 	mux.HandleFunc("/signin", Signin)
-	// mux.HandleFunc("/users", AllUsersEndpoint)
-	// mux.HandleFunc("/users/new", CreateUserEndpoint)
-	// mux.Handle("/users/update/", makeHandler(UpdateUserEndpoint))
-	// mux.Handle("/users/delete/", makeHandler(DeleteUserEndpoint))
-	// mux.Handle("/users/find/", makeHandler(FindUserEndpoint))
 	fmt.Println(fmt.Sprintf("Listening on port %s", strconv.Itoa(*port)))
 	if err = http.ListenAndServe(":"+strconv.Itoa(*port), mux); err != nil {
 		log.Fatal(err)
@@ -100,35 +95,6 @@ func (d *DAO) Connection() {
 	db = client.Database(d.Database)
 }
 
-// Insert into database
-func (d *DAO) Insert(creds Credentials) (err error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
-	_, err = db.Collection(COLLECTION).InsertOne(ctx, &creds)
-	if err != nil {
-		log.Fatal(err)
-	}
-	return err
-}
-
-// FindByUsername will find Credentials by username
-func (d *DAO) FindByUsername(username string) (creds Credentials, err error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	if err != nil {
-		log.Fatal(err)
-	}
-	err = db.Collection(COLLECTION).FindOne(ctx, bson.D{{Key: "username", Value: username}}).Decode(&creds)
-	defer cancel()
-	if err != nil {
-		if err == mongo.ErrNoDocuments {
-			fmt.Println(fmt.Sprintf("no matching username: %s", username))
-			return
-		}
-		log.Fatal(err)
-	}
-	return creds, err
-}
-
 func Signup(w http.ResponseWriter, r *http.Request) {
 	creds := &Credentials{}
 	err := json.NewDecoder(r.Body).Decode(creds)
@@ -142,7 +108,11 @@ func Signup(w http.ResponseWriter, r *http.Request) {
 	}
 	creds.Password = string(hashedPassword)
 
-	if err = d.Insert(*creds); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	_, err = db.Collection(COLLECTION).InsertOne(ctx, &creds)
+	if err != nil {
+		log.Fatal(err)
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
@@ -150,18 +120,27 @@ func Signup(w http.ResponseWriter, r *http.Request) {
 
 func Signin(w http.ResponseWriter, r *http.Request) {
 	creds := &Credentials{}
-	err := json.NewDecoder(r.Body).Decode(creds)
+	err := json.NewDecoder(r.Body).Decode(&creds)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
-	result, err := d.FindByUsername(creds.Username)
+
+	storedCreds := &Credentials{}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	err = db.Collection(COLLECTION).FindOne(ctx, bson.D{{Key: "username", Value: creds.Username}}).Decode(&storedCreds)
+	defer cancel()
 	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			w.WriteHeader(http.StatusNotFound)
+			fmt.Println(fmt.Sprintf("no matching username: %s", creds.Username))
+			return
+		}
 		w.WriteHeader(http.StatusInternalServerError)
-		return
+		log.Fatal(err)
 	}
 
-	if err = bcrypt.CompareHashAndPassword([]byte(result.Password), []byte(creds.Password)); err != nil {
+	if err = bcrypt.CompareHashAndPassword([]byte(storedCreds.Password), []byte(creds.Password)); err != nil {
 		w.WriteHeader(http.StatusUnauthorized)
 		fmt.Println(fmt.Sprintf("%s unauthorized", creds.Username))
 	} else {
