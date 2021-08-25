@@ -97,7 +97,7 @@ func (d *DAO) Connection() {
 
 func Signup(w http.ResponseWriter, r *http.Request) {
 	creds := &Credentials{}
-	err := json.NewDecoder(r.Body).Decode(creds)
+	err := json.NewDecoder(r.Body).Decode(&creds)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		return
