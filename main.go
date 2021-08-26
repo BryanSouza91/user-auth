@@ -11,16 +11,19 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/gomodule/redigo/redis"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/x/mongo/driver/uuid"
 	"golang.org/x/crypto/bcrypt"
 )
 
 var (
-	dao  = DAO{}
-	port *int
-	err  error
+	dao   = DAO{}
+	port  *int
+	err   error
+	cache redis.Conn
 )
 
 // Parse the configuration file 'conf.json', and establish a connection to DB
@@ -39,6 +42,17 @@ func init() {
 	}
 
 	dao.Connection()
+	initCache()
+}
+
+func initCache() {
+	// Initialize the redis connection to a redis instance running on your local machine
+	conn, err := redis.DialURL("redis://localhost")
+	if err != nil {
+		panic(err)
+	}
+	// Assign the connection to the package level `cache` variable
+	cache = conn
 }
 
 // Define HTTP request routes
@@ -144,6 +158,23 @@ func Signin(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
 		fmt.Println(fmt.Sprintf("%s unauthorized", creds.Username))
 	} else {
+		sessionToken, err := uuid.New()
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		_, err = cache.Do("SETEX", sessionToken, "120", creds.Username)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+
+		http.SetCookie(w, &http.Cookie{
+			Name:    "session_token",
+			Value:   fmt.Sprint(sessionToken),
+			Expires: time.Now().Add(120 * time.Second),
+		})
 		fmt.Println(fmt.Sprintf("Success! %s is authorized.", creds.Username))
 	}
+
 }
