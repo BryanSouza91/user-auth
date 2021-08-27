@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -9,21 +8,12 @@ import (
 	"net/http"
 	"os"
 	"strconv"
-	"time"
-
-	"github.com/gomodule/redigo/redis"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
-	"go.mongodb.org/mongo-driver/x/mongo/driver/uuid"
-	"golang.org/x/crypto/bcrypt"
 )
 
 var (
-	dao   = DAO{}
-	port  *int
-	err   error
-	cache redis.Conn
+	dao  = DAO{}
+	port *int
+	err  error
 )
 
 // Parse the configuration file 'conf.json', and establish a connection to DB
@@ -45,16 +35,6 @@ func init() {
 	initCache()
 }
 
-func initCache() {
-	// Initialize the redis connection to a redis instance running on your local machine
-	conn, err := redis.DialURL("redis://localhost")
-	if err != nil {
-		panic(err)
-	}
-	// Assign the connection to the package level `cache` variable
-	cache = conn
-}
-
 // Define HTTP request routes
 func main() {
 	mux := http.NewServeMux()
@@ -65,116 +45,4 @@ func main() {
 	if err = http.ListenAndServe(":"+strconv.Itoa(*port), mux); err != nil {
 		log.Fatal(err)
 	}
-}
-
-const (
-	COLLECTION = "users"
-)
-
-var (
-	d  *DAO
-	db *mongo.Database
-)
-
-type Credentials struct {
-	Username string `bson:"username" json:"username"`
-	Password string `bson:"password" json:"password"`
-}
-
-type DAO struct {
-	Server   string
-	Database string
-}
-
-// Connection to database
-func (d *DAO) Connection() {
-	fmt.Println("Connecting to MongoDB...")
-	clientOptions := options.Client().ApplyURI(d.Server)
-	client, err := mongo.NewClient(clientOptions)
-	if err != nil {
-		log.Fatal(err)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	err = client.Connect(ctx)
-	defer cancel()
-	if err != nil {
-		log.Fatal(err)
-	}
-	// Check the connection
-	err = client.Ping(ctx, nil)
-	if err != nil {
-		log.Fatal(err)
-	}
-	fmt.Println("Connected to MongoDB!")
-	db = client.Database(d.Database)
-}
-
-func Signup(w http.ResponseWriter, r *http.Request) {
-	creds := &Credentials{}
-	err := json.NewDecoder(r.Body).Decode(&creds)
-	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		return
-	}
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(creds.Password), 8)
-	if err != nil {
-		log.Fatal(err)
-	}
-	creds.Password = string(hashedPassword)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
-	_, err = db.Collection(COLLECTION).InsertOne(ctx, &creds)
-	if err != nil {
-		log.Fatal(err)
-		w.WriteHeader(http.StatusInternalServerError)
-		return
-	}
-}
-
-func Signin(w http.ResponseWriter, r *http.Request) {
-	creds := &Credentials{}
-	err := json.NewDecoder(r.Body).Decode(&creds)
-	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		return
-	}
-
-	storedCreds := &Credentials{}
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	err = db.Collection(COLLECTION).FindOne(ctx, bson.D{{Key: "username", Value: creds.Username}}).Decode(&storedCreds)
-	defer cancel()
-	if err != nil {
-		if err == mongo.ErrNoDocuments {
-			w.WriteHeader(http.StatusNotFound)
-			fmt.Println(fmt.Sprintf("no matching username: %s", creds.Username))
-			return
-		}
-		w.WriteHeader(http.StatusInternalServerError)
-		log.Fatal(err)
-	}
-
-	if err = bcrypt.CompareHashAndPassword([]byte(storedCreds.Password), []byte(creds.Password)); err != nil {
-		w.WriteHeader(http.StatusUnauthorized)
-		fmt.Println(fmt.Sprintf("%s unauthorized", creds.Username))
-	} else {
-		sessionToken, err := uuid.New()
-		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-		_, err = cache.Do("SETEX", sessionToken, "120", creds.Username)
-		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-
-		http.SetCookie(w, &http.Cookie{
-			Name:    "session_token",
-			Value:   fmt.Sprint(sessionToken),
-			Expires: time.Now().Add(120 * time.Second),
-		})
-		fmt.Println(fmt.Sprintf("Success! %s is authorized.", creds.Username))
-	}
-
 }
