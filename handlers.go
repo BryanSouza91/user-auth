@@ -10,12 +10,11 @@ import (
 
 	"github.com/gomodule/redigo/redis"
 	"github.com/google/uuid"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/mongo"
 	"golang.org/x/crypto/bcrypt"
 )
 
 func Signup(w http.ResponseWriter, r *http.Request) {
+	fmt.Println("Signing up...")
 	creds := &Credentials{}
 	err := json.NewDecoder(r.Body).Decode(&creds)
 	if err != nil {
@@ -25,12 +24,20 @@ func Signup(w http.ResponseWriter, r *http.Request) {
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(creds.Password), 8)
 	if err != nil {
 		log.Fatal(err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
 	}
 	creds.Password = string(hashedPassword)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
-	_, err = db.Collection(COLLECTION).InsertOne(ctx, &creds)
+	insertUserSQL := `INSERT INTO user(username, password) VALUES (?, ?)`
+	statement, err := d.DB.Prepare(insertUserSQL) // Prepare statement.
+	// This is good to avoid SQL injections
+	if err != nil {
+		log.Fatal(err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	_, err = statement.Exec(creds.Username, creds.Password)
 	if err != nil {
 		log.Fatal(err)
 		w.WriteHeader(http.StatusInternalServerError)
@@ -44,7 +51,6 @@ func Signup(w http.ResponseWriter, r *http.Request) {
 func Signin(w http.ResponseWriter, r *http.Request) {
 	creds := &Credentials{}
 	storedCreds := &Credentials{}
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	err := json.NewDecoder(r.Body).Decode(&creds)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
@@ -64,16 +70,21 @@ func Signin(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		err = db.Collection(COLLECTION).FindOne(ctx, bson.D{{Key: "username", Value: creds.Username}}).Decode(&storedCreds)
-		defer cancel()
+		// refactor mongo code to sql code
+		getUserSQL := `SELECT ? FROM user`
+		statement, err := d.DB.Prepare(getUserSQL) // Prepare statement.
+		// This is good to avoid SQL injections
 		if err != nil {
-			if err == mongo.ErrNoDocuments {
-				w.WriteHeader(http.StatusNotFound)
-				fmt.Println(fmt.Sprintf("no matching username: %s", creds.Username))
-				return
-			}
-			w.WriteHeader(http.StatusInternalServerError)
 			log.Fatal(err)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		err = statement.QueryRowContext(ctx, creds.Username).Scan(&storedCreds.Password)
+		if err != nil {
+			w.WriteHeader(http.StatusNotFound)
+			fmt.Println(fmt.Sprintf("no matching username: %s", creds.Username))
 			return
 		}
 		if err = bcrypt.CompareHashAndPassword([]byte(storedCreds.Password), []byte(creds.Password)); err != nil {
