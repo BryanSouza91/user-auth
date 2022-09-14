@@ -61,7 +61,6 @@ func Signin(w http.ResponseWriter, r *http.Request) {
 	} else {
 		storedSessionCookie, err := r.Cookie("session_token")
 		if err != nil {
-			fmt.Println(err)
 			fmt.Println(fmt.Sprintf("No active session found for %s", creds.Username))
 		} else {
 			storedSessionToken := storedSessionCookie.Value
