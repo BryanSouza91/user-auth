@@ -61,6 +61,7 @@ func Signin(w http.ResponseWriter, r *http.Request) {
 	} else {
 		storedSessionCookie, err := r.Cookie("session_token")
 		if err != nil {
+			fmt.Println(err)
 			fmt.Println(fmt.Sprintf("No active session found for %s", creds.Username))
 		} else {
 			storedSessionToken := storedSessionCookie.Value
@@ -96,7 +97,7 @@ func Signin(w http.ResponseWriter, r *http.Request) {
 			return
 		} else {
 			sessionToken := uuid.NewString()
-			_, err = cache.Do("SETEX", sessionToken, 120, creds.Username)
+			_, err = cache.Do("SETEX", sessionToken, 1200, creds.Username)
 			if err != nil {
 				w.WriteHeader(http.StatusInternalServerError)
 				return
@@ -104,7 +105,7 @@ func Signin(w http.ResponseWriter, r *http.Request) {
 			http.SetCookie(w, &http.Cookie{
 				Name:    "session_token",
 				Value:   fmt.Sprint(sessionToken),
-				Expires: time.Now().Add(120 * time.Second),
+				Expires: time.Now().Add(1200 * time.Second),
 			})
 			w.WriteHeader(http.StatusOK)
 			fmt.Println(fmt.Sprintf("Session token: %s", sessionToken))

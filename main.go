@@ -45,4 +45,5 @@ func main() {
 	if err = http.ListenAndServe(":"+strconv.Itoa(*port), mux); err != nil {
 		log.Fatal(err)
 	}
+	defer dao.DB.Close() // Defer Closing the database
 }

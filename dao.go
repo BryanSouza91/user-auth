@@ -14,7 +14,7 @@ import (
 
 // Connection to database
 func (d *DAO) Connection() {
-	fmt.Printf("Connecting to SQLite DB at %s", d.DatabaseSourceName)
+	fmt.Printf("Connecting to SQLite DB at %s\n", d.DatabaseSourceName)
 
 	_, err := os.Stat(d.DatabaseSourceName)
 	if errors.Is(err, os.ErrNotExist) {
@@ -26,9 +26,8 @@ func (d *DAO) Connection() {
 		}
 		file.Close()
 
-	} else {
-		fmt.Println(err.Error())
-		log.Fatal(err)
+	} else if err != nil {
+		log.Fatalf("Here: %v", err)
 	}
 
 	// Open the created SQLite File
@@ -39,7 +38,6 @@ func (d *DAO) Connection() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer d.DB.Close() // Defer Closing the database
 
 	// Check the connection
 	err = d.DB.Ping()
@@ -50,7 +48,7 @@ func (d *DAO) Connection() {
 	fmt.Println("Creating User Table...")
 
 	// SQL Statement for Create Table
-	createUserTableSQL := `CREATE TABLE user (
+	createUserTableSQL := `CREATE TABLE IF NOT EXISTS user (
 		"id" integer NOT NULL PRIMARY KEY AUTOINCREMENT,		
 		"username" TEXT,
 		"password" TEXT		
@@ -65,5 +63,4 @@ func (d *DAO) Connection() {
 	}
 	// Execute SQL Statements
 	statement.Exec()
-	log.Println("User table created successfully!")
 }
