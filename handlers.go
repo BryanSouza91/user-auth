@@ -18,6 +18,7 @@ func Signup(w http.ResponseWriter, r *http.Request) {
 	creds := &Credentials{}
 	err := json.NewDecoder(r.Body).Decode(&creds)
 	if err != nil {
+		log.Fatal(err)
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
@@ -29,8 +30,10 @@ func Signup(w http.ResponseWriter, r *http.Request) {
 	}
 	creds.Password = string(hashedPassword)
 
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 	insertUserSQL := `INSERT INTO user(username, password) VALUES (?, ?)`
-	statement, err := d.DB.Prepare(insertUserSQL) // Prepare statement.
+	statement, err := dao.DB.PrepareContext(ctx, insertUserSQL) // Prepare statement.
 	// This is good to avoid SQL injections
 	if err != nil {
 		log.Fatal(err)
@@ -71,16 +74,16 @@ func Signin(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		// refactor mongo code to sql code
-		getUserSQL := `SELECT ? FROM user`
-		statement, err := d.DB.Prepare(getUserSQL) // Prepare statement.
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		getUserSQL := `SELECT password FROM user WHERE username = ?`
+		statement, err := dao.DB.PrepareContext(ctx, getUserSQL) // Prepare statement.
 		// This is good to avoid SQL injections
 		if err != nil {
 			log.Fatal(err)
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-		defer cancel()
 		err = statement.QueryRowContext(ctx, creds.Username).Scan(&storedCreds.Password)
 		if err != nil {
 			w.WriteHeader(http.StatusNotFound)

@@ -1,28 +1,22 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
 	"log"
 	"os"
+	"time"
 
 	_ "github.com/mattn/go-sqlite3"
-)
-
-const (
-	COLLECTION = "users"
-)
-
-var (
-	d *DAO
 )
 
 // Connection to database
 func (d *DAO) Connection() {
 	fmt.Printf("Connecting to SQLite DB at %s", d.DatabaseSourceName)
 
-	fsInfo, err := os.Stat(d.DatabaseSourceName)
+	_, err := os.Stat(d.DatabaseSourceName)
 	if errors.Is(err, os.ErrNotExist) {
 		// Create SQLite file since it does not exist
 		file, err := os.Create(
@@ -36,7 +30,6 @@ func (d *DAO) Connection() {
 		fmt.Println(err.Error())
 		log.Fatal(err)
 	}
-	fmt.Printf("Fileinfo: %v", fsInfo)
 
 	// Open the created SQLite File
 	d.DB, err = sql.Open(
@@ -62,8 +55,11 @@ func (d *DAO) Connection() {
 		"username" TEXT,
 		"password" TEXT		
 	  );`
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 	// Prepare SQL Statement
-	statement, err := d.DB.Prepare(createUserTableSQL)
+	statement, err := d.DB.PrepareContext(ctx, createUserTableSQL)
 	if err != nil {
 		log.Fatal(err.Error())
 	}
