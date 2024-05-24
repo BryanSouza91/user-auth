@@ -3,8 +3,8 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"log"
 	"net/http"
 	"time"
 
@@ -15,102 +15,135 @@ import (
 
 func Signup(w http.ResponseWriter, r *http.Request) {
 	fmt.Println("Signing up...")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	// Decode request body and handle bad requests
 	creds := &Credentials{}
-	err := json.NewDecoder(r.Body).Decode(&creds)
-	if err != nil {
-		log.Fatal(err)
+	if err := json.NewDecoder(r.Body).Decode(&creds); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
-		return
+		return // Early return for bad request
 	}
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(creds.Password), 8)
+
+	// Hash password and handle errors
+	hashedPassword, err := hashPassword(creds.Password) // Refactored to separate function
 	if err != nil {
-		log.Fatal(err)
 		w.WriteHeader(http.StatusInternalServerError)
-		return
+		return // Early return for internal server error
 	}
 	creds.Password = string(hashedPassword)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	insertUserSQL := `INSERT INTO user(username, password) VALUES (?, ?)`
-	statement, err := dao.DB.PrepareContext(ctx, insertUserSQL) // Prepare statement.
-	// This is good to avoid SQL injections
-	if err != nil {
-		log.Fatal(err)
+	// Database interaction with context and prepared statement
+	if err := createUser(ctx, creds); err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		return
+		return // Early return for internal server error
 	}
-	_, err = statement.Exec(creds.Username, creds.Password)
-	if err != nil {
-		log.Fatal(err)
-		w.WriteHeader(http.StatusInternalServerError)
-		return
-	}
+
 	w.WriteHeader(http.StatusOK)
-	fmt.Println(fmt.Sprintf("Success! %s is registered.", creds.Username))
-	return
+	fmt.Printf("Success! %s is registered.\n", creds.Username)
+}
+
+// Separate function for hashing password with error handling
+func hashPassword(password string) ([]byte, error) {
+	return bcrypt.GenerateFromPassword([]byte(password), 8)
+}
+
+// Separate function for user creation with context and prepared statement
+func createUser(ctx context.Context, creds *Credentials) error {
+	insertUserSQL := `INSERT INTO user(username, password) VALUES (?, ?)`
+	statement, err := dao.DB.PrepareContext(ctx, insertUserSQL)
+	if err != nil {
+		return err
+	}
+	defer statement.Close() // Ensure statement is closed
+
+	_, err = statement.Exec(creds.Username, creds.Password)
+	return err
 }
 
 func Signin(w http.ResponseWriter, r *http.Request) {
 	creds := &Credentials{}
-	storedCreds := &Credentials{}
 	err := json.NewDecoder(r.Body).Decode(&creds)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		return
-	} else {
-		storedSessionCookie, err := r.Cookie("session_token")
-		if err != nil {
-			fmt.Println(fmt.Sprintf("No active session found for %s", creds.Username))
-		} else {
-			storedSessionToken := storedSessionCookie.Value
-			cachedSessionUsername, err := redis.String(cache.Do("GET", storedSessionToken))
-			if err != nil {
-				fmt.Println(fmt.Sprintf("No active session found for %s", creds.Username))
-			} else if cachedSessionUsername == creds.Username {
-				fmt.Println(fmt.Sprintf("Success! %s is authorized via session token.", cachedSessionUsername))
-				w.WriteHeader(http.StatusOK)
-				return
-			}
-		}
-		// refactor mongo code to sql code
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		getUserSQL := `SELECT password FROM user WHERE username = ?`
-		statement, err := dao.DB.PrepareContext(ctx, getUserSQL) // Prepare statement.
-		// This is good to avoid SQL injections
-		if err != nil {
-			log.Fatal(err)
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-		err = statement.QueryRowContext(ctx, creds.Username).Scan(&storedCreds.Password)
-		if err != nil {
-			w.WriteHeader(http.StatusNotFound)
-			fmt.Println(fmt.Sprintf("no matching username: %s", creds.Username))
-			return
-		}
-		if err = bcrypt.CompareHashAndPassword([]byte(storedCreds.Password), []byte(creds.Password)); err != nil {
-			w.WriteHeader(http.StatusUnauthorized)
-			fmt.Println(fmt.Sprintf("%s unauthorized", creds.Username))
-			return
-		} else {
-			sessionToken := uuid.NewString()
-			_, err = cache.Do("SETEX", sessionToken, 1200, creds.Username)
-			if err != nil {
-				w.WriteHeader(http.StatusInternalServerError)
-				return
-			}
-			http.SetCookie(w, &http.Cookie{
-				Name:    "session_token",
-				Value:   fmt.Sprint(sessionToken),
-				Expires: time.Now().Add(1200 * time.Second),
-			})
-			w.WriteHeader(http.StatusOK)
-			fmt.Println(fmt.Sprintf("Session token: %s", sessionToken))
-			fmt.Println(fmt.Sprintf("Success! %s is authorized.", creds.Username))
-			return
-		}
 	}
 
+	// Check session token first (early return)
+	sessionToken, err := validateSessionToken(r)
+	if err == nil {
+		fmt.Printf("Success! %s is authorized via session token.\n", sessionToken)
+		w.WriteHeader(http.StatusOK)
+		return
+	} else if err != ErrInvalidSessionToken {
+		// Handle other errors (e.g., redis errors)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	// Username/Password Login
+	var sqlQuery = `SELECT * FROM user WHERE username = ?`
+
+	rows, err := dao.DB.Query(sqlQuery, creds.Username)
+	if err != nil {
+		// Handle error (consider different error types)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close() // Ensure rows are closed
+
+	if !rows.Next() {
+		// No matching username
+		w.WriteHeader(http.StatusNotFound)
+		fmt.Printf("no matching username: %s", creds.Username)
+		return
+	}
+
+	storedCreds := &Credentials{}
+	err = rows.Scan(&storedCreds.Username, &storedCreds.Password) // Scan row data
+	if err != nil {
+		// Handle error (consider different error types)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	if err = bcrypt.CompareHashAndPassword([]byte(storedCreds.Password), []byte(creds.Password)); err != nil {
+		w.WriteHeader(http.StatusUnauthorized)
+		fmt.Printf("%s unauthorized.\n", creds.Username)
+		return
+	}
+
+	// Login successful, create new session
+	sessionToken = uuid.NewString()
+	_, err = cache.Do("SETEX", sessionToken, 120, creds.Username)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:    "session_token",
+		Value:   fmt.Sprint(sessionToken),
+		Expires: time.Now().Add(120 * time.Second),
+	})
+	w.WriteHeader(http.StatusOK)
+	fmt.Printf("Session token: %s\n", sessionToken)
+	fmt.Printf("Success! %s is authorized.\n", creds.Username)
 }
+
+func validateSessionToken(r *http.Request) (string, error) {
+	storedSessionCookie, err := r.Cookie("session_token")
+	if err != nil {
+		return "", ErrInvalidSessionToken
+	}
+	storedSessionToken := storedSessionCookie.Value
+	cachedSessionUsername, err := redis.String(cache.Do("GET", storedSessionToken))
+	if err != nil {
+		return "", err // Consider wrapping in a specific error type here
+	}
+	if cachedSessionUsername != "" { // Early return if valid
+		return cachedSessionUsername, nil
+	}
+	return "", ErrInvalidSessionToken
+}
+
+var ErrInvalidSessionToken = errors.New("invalid session token") // Example custom error type

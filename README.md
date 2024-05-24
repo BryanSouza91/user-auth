@@ -2,7 +2,7 @@
 
 Work in progress 
 
-User authentication and session tokenization using Redis and MongoDB.
+User authentication and session tokenization using Redis and SQLite.
 
 # Instructions
 
@@ -13,7 +13,7 @@ User authentication and session tokenization using Redis and MongoDB.
 
 ### External Packages
 * [redis](https://github.com/gomodule/redigo/redis) - Redis Server
-* [mongo-driver](https://pkg.go.dev/go.mongodb.org/mongo-driver) - MongoDB driver
+* [go-sqlite3](https://pkg.go.dev/mattn/go-sqlite3) - SQLite3 driver
 
 ### Run Redis Server
 Before running, a Redis Server instance is required to be running.

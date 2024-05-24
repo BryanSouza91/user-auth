@@ -31,7 +31,10 @@ func init() {
 		log.Fatal("error:", err)
 	}
 
-	dao.Connection()
+	err = dao.Connection()
+	if err != nil {
+		log.Printf("Connection Error: %q\n", err)
+	}
 	initCache()
 }
 
@@ -41,7 +44,7 @@ func main() {
 
 	mux.HandleFunc("/signup", Signup)
 	mux.HandleFunc("/signin", Signin)
-	fmt.Println(fmt.Sprintf("Listening on port %s", strconv.Itoa(*port)))
+	fmt.Printf("Listening on port %s\n", strconv.Itoa(*port))
 	if err = http.ListenAndServe(":"+strconv.Itoa(*port), mux); err != nil {
 		log.Fatal(err)
 	}
