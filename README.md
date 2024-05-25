@@ -18,12 +18,9 @@ User authentication and session tokenization using Redis and SQLite.
 ### Run Redis Server
 Before running, a Redis Server instance is required to be running.
 
-### Configuration .json
-Besure to recreate your own conf.json using the example provided
-
 ### To get this repository and run
 
  ```sh
 $ git clone https://github.com/BryanSouza91/user-auth.git
-$ go run app.go
+$ go run *.go
 ```

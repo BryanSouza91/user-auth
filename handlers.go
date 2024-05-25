@@ -60,6 +60,37 @@ func createUser(ctx context.Context, creds *Credentials) error {
 	return err
 }
 
+func Signout(w http.ResponseWriter, r *http.Request) {
+	fmt.Println("Signing out...")
+
+	// Get session token from cookie
+	sessionCookie, err := r.Cookie("session_token")
+	if err != nil {
+		// Handle missing cookie gracefully (e.g., inform user they're not signed in)
+		fmt.Println("No session cookie found.")
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+
+	// Delete session token from cache
+	_, err = cache.Do("DEL", sessionCookie.Value)
+	if err != nil {
+		fmt.Printf("Error deleting session token: %v\n", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	// Remove session cookie from client
+	http.SetCookie(w, &http.Cookie{
+		Name:   "session_token",
+		Value:  "",
+		MaxAge: -1, // Expire immediately
+	})
+
+	w.WriteHeader(http.StatusOK)
+	fmt.Println("Successfully signed out.")
+}
+
 func Signin(w http.ResponseWriter, r *http.Request) {
 	fmt.Println("Signing in...")
 

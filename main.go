@@ -1,35 +1,26 @@
 package main
 
 import (
-	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
 	"net/http"
-	"os"
 	"strconv"
 )
 
 var (
-	dao  = DAO{}
-	port *int
-	err  error
+	dao        = DAO{}
+	port       int
+	dbFilename string
+	err        error
 )
 
 // Parse the configuration file 'conf.json', and establish a connection to DB
 func init() {
-	port = flag.Int("port", 3000, "specified port")
+	port = *flag.Int("port", 3000, "specified port")
+	dbFilename = *flag.String("dbFilename", "users.db", "filename for SQLite database")
 	flag.Parse()
-	file, err := os.Open("conf.json")
-	if err != nil {
-		log.Fatal("error:", err)
-	}
-	decoder := json.NewDecoder(file)
-	defer file.Close()
-	err = decoder.Decode(&dao)
-	if err != nil {
-		log.Fatal("error:", err)
-	}
+	dao.DatabaseSourceName = dbFilename
 
 	err = dao.Connection()
 	if err != nil {
@@ -44,8 +35,10 @@ func main() {
 
 	mux.HandleFunc("/signup", Signup)
 	mux.HandleFunc("/signin", Signin)
-	fmt.Printf("Listening on port %s\n", strconv.Itoa(*port))
-	if err = http.ListenAndServe(":"+strconv.Itoa(*port), mux); err != nil {
+	mux.HandleFunc("/signout", Signout)
+
+	fmt.Printf("Listening on port %s\n", strconv.Itoa(port))
+	if err = http.ListenAndServe(":"+strconv.Itoa(port), mux); err != nil {
 		log.Fatal(err)
 	}
 	defer dao.DB.Close() // Defer Closing the database
