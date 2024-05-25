@@ -16,9 +16,6 @@ import (
 func Signup(w http.ResponseWriter, r *http.Request) {
 	fmt.Println("Signing up...")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
-
 	// Decode request body and handle bad requests
 	creds := &Credentials{}
 	if err := json.NewDecoder(r.Body).Decode(&creds); err != nil {
@@ -32,10 +29,11 @@ func Signup(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		return // Early return for internal server error
 	}
+
 	creds.Password = string(hashedPassword)
 
 	// Database interaction with context and prepared statement
-	if err := createUser(ctx, creds); err != nil {
+	if err := createUser(r.Context(), creds); err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		return // Early return for internal server error
 	}
@@ -63,6 +61,8 @@ func createUser(ctx context.Context, creds *Credentials) error {
 }
 
 func Signin(w http.ResponseWriter, r *http.Request) {
+	fmt.Println("Signing in...")
+
 	creds := &Credentials{}
 	err := json.NewDecoder(r.Body).Decode(&creds)
 	if err != nil {
@@ -81,8 +81,10 @@ func Signin(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
+
+	fmt.Println("Querying database...")
 	// Username/Password Login
-	var sqlQuery = `SELECT * FROM user WHERE username = ?`
+	var sqlQuery = `SELECT username, password FROM user WHERE username = ?`
 
 	rows, err := dao.DB.Query(sqlQuery, creds.Username)
 	if err != nil {
@@ -107,12 +109,15 @@ func Signin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	fmt.Println("Hashing password...")
+
 	if err = bcrypt.CompareHashAndPassword([]byte(storedCreds.Password), []byte(creds.Password)); err != nil {
 		w.WriteHeader(http.StatusUnauthorized)
-		fmt.Printf("%s unauthorized.\n", creds.Username)
+		fmt.Printf("%s unauthorized.\n%s\n", creds.Username, err)
 		return
 	}
 
+	fmt.Println("Creating session token...")
 	// Login successful, create new session
 	sessionToken = uuid.NewString()
 	_, err = cache.Do("SETEX", sessionToken, 120, creds.Username)
@@ -131,6 +136,7 @@ func Signin(w http.ResponseWriter, r *http.Request) {
 }
 
 func validateSessionToken(r *http.Request) (string, error) {
+	fmt.Println("Validating Session Token...")
 	storedSessionCookie, err := r.Cookie("session_token")
 	if err != nil {
 		return "", ErrInvalidSessionToken
