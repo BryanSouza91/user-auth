@@ -5,10 +5,10 @@
 This repository provides user authentication functionalities with a choice of MongoDB or SQLite for data storage.
 
 * **MongoDB Authentication:**
-  * Branch: [mongodb](https://github.com/BryanSouza91/user-auth/tree/mongodb) (or specific branch name)
+  * Branch: [mongodb](https://github.com/BryanSouza91/user-auth/tree/mongodb)
   * User authentication and session tokenization using Redis and MongoDB.
 * **SQLite Authentication:**
-  * Branch: [sqlite](https://github.com/BryanSouza91/user-auth/tree/sqlite) (or specific branch name)
+  * Branch: [sqlite](https://github.com/BryanSouza91/user-auth/tree/sqlite)
   * User authentication and session tokenization using Redis and SQLite.
 
 **Choosing the Database:**
