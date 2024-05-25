@@ -48,6 +48,7 @@ func Signin(w http.ResponseWriter, r *http.Request) {
 	err := json.NewDecoder(r.Body).Decode(&creds)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
+		defer cancel()
 		return
 	} else {
 		storedSessionCookie, err := r.Cookie("session_token")
